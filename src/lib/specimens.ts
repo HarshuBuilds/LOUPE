@@ -1,6 +1,16 @@
-import exifr from 'exifr'
-import { assertCanvasReadable, buildLuminance, clampToWorking, findChromaSeed } from './layers'
-import type { ExifEntry, ForensicInfo, Specimen, SpecimenProvenance } from './types'
+import { summarizeExif } from './exif'
+import type { ExifSummary } from './exif'
+import {
+  MAX_WORKING_EDGE,
+  assertCanvasReadable,
+  buildLuminance,
+  canvasFromPixels,
+  clampToWorking,
+  findChromaSeed,
+} from './layers'
+import { MAX_UPLOAD_EDGE, MAX_UPLOAD_PIXELS, readImageSize } from './imageSize'
+import { decodeInWorker, opticsWorkerSupported } from './opticsWorker'
+import type { ForensicInfo, Specimen, SpecimenProvenance } from './types'
 
 const BASE = import.meta.env.BASE_URL
 
@@ -9,6 +19,8 @@ const PLAN = [
   { slot: '02-color-study.jpg', label: 'SPECIMEN 02', role: 'COLOUR / PRINT' },
   { slot: '03-forensic-edit.jpg', label: 'SPECIMEN 03', role: 'FORENSIC SPLICE' },
 ] as const
+
+const DECODE_FAILED = 'Decode failed — this file is not a readable JPEG, PNG or WebP'
 
 interface CreditsFile {
   specimens: Array<{
@@ -27,157 +39,101 @@ interface CreditsFile {
   }>
 }
 
-interface Parsed {
-  Make?: string
-  Model?: string
-  LensModel?: string
-  Lens?: string
-  ISO?: number
-  FNumber?: number
-  ExposureTime?: number
-  FocalLength?: number
-  DateTimeOriginal?: Date
-  ColorSpace?: number
-  Software?: string
-  SerialNumber?: string
-  latitude?: number
-  longitude?: number
-  GPSLatitude?: number
-  GPSLongitude?: number
-  [key: string]: unknown
+/**
+ * A specimen reduced to its working resolution, with everything the table needs
+ * to sample it. Decoding happens in the optics worker where possible, straight
+ * to the working edge, so a 50 MP file never becomes a full-size bitmap.
+ */
+interface Prepared {
+  canvas: HTMLCanvasElement
+  w: number
+  h: number
+  nativeWidth: number
+  nativeHeight: number
+  lum: Uint8Array
+  chromaSeed: { x: number; y: number }
+  exif: ExifSummary
+  bytes: number
 }
-
-function formatShutter(value: unknown): string {
-  const n = typeof value === 'number' ? value : Number(value)
-  if (!Number.isFinite(n) || n <= 0) return '—'
-  if (n >= 1) return `${Number(n.toFixed(n < 10 ? 1 : 0))}s`
-  return `1/${Math.round(1 / n)}s`
-}
-
-function formatFocal(value: unknown): string {
-  const n = typeof value === 'number' ? value : Number(value)
-  return Number.isFinite(n) && n > 0 ? `${Number(n.toFixed(1))}mm` : '—'
-}
-
-function formatDate(value: unknown): string {
-  if (!value) return '—'
-  const date = value instanceof Date ? value : new Date(String(value))
-  if (Number.isNaN(date.getTime())) return '—'
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
-}
-
-async function parseExif(buffer: ArrayBuffer): Promise<Parsed | null> {
-  try {
-    return (await exifr.parse(buffer, {
-      tiff: true,
-      exif: true,
-      gps: true,
-      iptc: true,
-      xmp: true,
-      reviveValues: true,
-      translateValues: true,
-    })) as Parsed | null
-  } catch {
-    return null
-  }
-}
-
-function buildExifRows(parsed: Parsed | null, gps: { lat: number; lon: number } | null): ExifEntry[] {
-  if (!parsed) return [{ label: 'EXIF HEADER', value: 'NO METADATA PRESENT' }]
-  const rows: ExifEntry[] = []
-  const push = (label: string, value: string | undefined | null, risk = false) => {
-    if (!value || value === '—') return
-    rows.push({ label, value, risk })
-  }
-  const body = [parsed.Make, parsed.Model].filter(Boolean).join(' ').trim()
-  push('CAMERA BODY', body || 'NOT RECORDED')
-  push('OPTICS', parsed.LensModel ?? parsed.Lens ?? 'NOT RECORDED')
-  push('FOCAL LENGTH', formatFocal(parsed.FocalLength))
-  push(
-    'APERTURE',
-    Number.isFinite(parsed.FNumber) ? `f/${Number(Number(parsed.FNumber).toFixed(1))}` : undefined,
-  )
-  push('SENSITIVITY', parsed.ISO ? `ISO ${parsed.ISO}` : undefined)
-  push('SHUTTER', formatShutter(parsed.ExposureTime))
-  push('CAPTURED', formatDate(parsed.DateTimeOriginal))
-  push(
-    'COLOUR SPACE',
-    parsed.ColorSpace === 1 ? 'sRGB' : parsed.ColorSpace ? `ID ${parsed.ColorSpace}` : undefined,
-  )
-  push('SOFTWARE', parsed.Software)
-  push('BODY SERIAL', parsed.SerialNumber)
-  if (gps) {
-    push('GPS POSITION', `${gps.lat.toFixed(6)}, ${gps.lon.toFixed(6)}`, true)
-  } else {
-    push('GPS POSITION', 'NOT PRESENT')
-  }
-  return rows
-}
-
-function readGps(parsed: Parsed | null): { lat: number; lon: number } | null {
-  const lat = parsed?.latitude ?? parsed?.GPSLatitude
-  const lon = parsed?.longitude ?? parsed?.GPSLongitude
-  return typeof lat === 'number' && typeof lon === 'number' ? { lat, lon } : null
-}
-
-const MAX_UPLOAD_PIXELS = 80_000_000
-const MAX_UPLOAD_EDGE = 12_000
 
 /**
- * Intrinsic size straight from the file header, so an oversized image is
- * refused before the browser allocates a full-resolution bitmap. Returns null
- * when the header cannot be read, in which case the decode error path handles it.
+ * Main-thread fallback decode, still resized where the header tells us the
+ * dimensions. Engines without a worker keep working, just without the offload.
  */
-function readImageSize(buffer: ArrayBuffer): { width: number; height: number } | null {
-  if (buffer.byteLength < 32) return null
-  const view = new DataView(buffer)
-  const bytes = new Uint8Array(buffer)
+async function decodeBitmap(
+  blob: Blob,
+  header: { width: number; height: number } | null,
+): Promise<ImageBitmap> {
+  const longer = header ? Math.max(header.width, header.height) : 0
+  const scale = longer ? Math.min(1, MAX_WORKING_EDGE / longer) : 1
+  const resize: ImageBitmapOptions =
+    header && scale < 1
+      ? header.width >= header.height
+        ? { resizeWidth: Math.max(1, Math.round(header.width * scale)), resizeQuality: 'high' }
+        : { resizeHeight: Math.max(1, Math.round(header.height * scale)), resizeQuality: 'high' }
+      : {}
 
-  if (bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) {
-    return { width: view.getUint32(16), height: view.getUint32(20) }
-  }
-
-  if (bytes[0] === 0xff && bytes[1] === 0xd8) {
-    let offset = 2
-    while (offset + 9 < bytes.length) {
-      if (bytes[offset] !== 0xff) {
-        offset += 1
-        continue
-      }
-      const marker = bytes[offset + 1]
-      if (marker === 0xd8 || marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) {
-        offset += 2
-        continue
-      }
-      const length = view.getUint16(offset + 2)
-      if (length < 2) return null
-      const isFrameHeader =
-        marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc
-      if (isFrameHeader) {
-        return { height: view.getUint16(offset + 5), width: view.getUint16(offset + 7) }
-      }
-      offset += 2 + length
+  try {
+    return await createImageBitmap(blob, { imageOrientation: 'from-image', ...resize })
+  } catch {
+    try {
+      return await createImageBitmap(blob, resize)
+    } catch {
+      return await createImageBitmap(blob)
     }
-    return null
   }
+}
 
-  const isWebp =
-    bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50 // 'WEBP'
-  if (isWebp) {
-    const chunk = String.fromCharCode(bytes[12], bytes[13], bytes[14], bytes[15])
-    if (chunk === 'VP8X') {
+async function prepare(buffer: ArrayBuffer, type: string): Promise<Prepared> {
+  const bytes = buffer.byteLength
+
+  if (opticsWorkerSupported()) {
+    try {
+      const decoded = await decodeInWorker(buffer, type, MAX_WORKING_EDGE)
       return {
-        width: 1 + (bytes[24] | (bytes[25] << 8) | (bytes[26] << 16)),
-        height: 1 + (bytes[27] | (bytes[28] << 8) | (bytes[29] << 16)),
+        canvas: canvasFromPixels(decoded.pixels, decoded.width, decoded.height),
+        w: decoded.width,
+        h: decoded.height,
+        // The file's own dimensions read better than the resized bitmap's.
+        nativeWidth: decoded.fileWidth || decoded.nativeWidth,
+        nativeHeight: decoded.fileHeight || decoded.nativeHeight,
+        lum: decoded.lum,
+        chromaSeed: decoded.chromaSeed,
+        exif: decoded.exif,
+        bytes,
       }
-    }
-    if (chunk === 'VP8 ') {
-      return { width: view.getUint16(26, true) & 0x3fff, height: view.getUint16(28, true) & 0x3fff }
+    } catch (error) {
+      const message = (error as Error).message ?? ''
+      // The buffer was transferred, so a worker failure cannot be retried here.
+      throw new Error(message.includes('DECODE') ? DECODE_FAILED : message || DECODE_FAILED)
     }
   }
 
-  return null
+  const header = readImageSize(buffer)
+  let bitmap: ImageBitmap
+  try {
+    bitmap = await decodeBitmap(new Blob([buffer], { type }), header)
+  } catch {
+    throw new Error(DECODE_FAILED)
+  }
+
+  try {
+    const { canvas, w, h } = clampToWorking(bitmap)
+    return {
+      canvas,
+      w,
+      h,
+      // Without a header the resized bitmap is the best size we have.
+      nativeWidth: header?.width ?? bitmap.width,
+      nativeHeight: header?.height ?? bitmap.height,
+      lum: buildLuminance(canvas),
+      chromaSeed: findChromaSeed(canvas, w, h, Math.round(Math.min(w, h) * 0.15)),
+      exif: await summarizeExif(buffer),
+      bytes,
+    }
+  } finally {
+    bitmap.close?.()
+  }
 }
 
 interface AssembleInput {
@@ -185,56 +141,34 @@ interface AssembleInput {
   filename: string
   label: string
   role: string
-  bytes: number
-  buffer: ArrayBuffer
-  bitmap: ImageBitmap
+  prepared: Prepared
   provenance: SpecimenProvenance
   forensic?: ForensicInfo
 }
 
 async function assemble(input: AssembleInput): Promise<Specimen> {
-  try {
-    const { canvas, w, h } = clampToWorking(input.bitmap)
-    // Refuse early if the pixels are not readable, instead of failing mid-eject.
-    if (!assertCanvasReadable(canvas)) throw new Error('CANVAS TAINTED · SPECIMEN REJECTED')
-    const lum = buildLuminance(canvas)
-    const chromaSeed = findChromaSeed(canvas, w, h, Math.round(Math.min(w, h) * 0.15))
-    const parsed = await parseExif(input.buffer.slice(0))
-    const gps = readGps(parsed)
-    const nativeWidth = input.bitmap.width
-    const nativeHeight = input.bitmap.height
+  const { prepared } = input
+  // Refuse early if the pixels are not readable, instead of failing mid-eject.
+  if (!assertCanvasReadable(prepared.canvas)) throw new Error('CANVAS TAINTED · SPECIMEN REJECTED')
 
-    return {
-      id: input.id,
-      filename: input.filename,
-      label: input.label,
-      role: input.role,
-      bytes: input.bytes,
-      nativeWidth,
-      nativeHeight,
-      w,
-      h,
-      work: canvas,
-      lum,
-      exif: buildExifRows(parsed, gps),
-      tagCount: parsed ? Object.keys(parsed).length : 0,
-      gps,
-      provenance: input.provenance,
-      forensic: input.forensic,
-      chromaSeed,
-    }
-  } finally {
-    // The bitmap is only a decode scratch: release it even when the specimen is
-    // rejected, or a large rejected upload pins tens of megabytes.
-    input.bitmap.close?.()
-  }
-}
-
-async function decode(blob: Blob): Promise<ImageBitmap> {
-  try {
-    return await createImageBitmap(blob, { imageOrientation: 'from-image' })
-  } catch {
-    return await createImageBitmap(blob)
+  return {
+    id: input.id,
+    filename: input.filename,
+    label: input.label,
+    role: input.role,
+    bytes: prepared.bytes,
+    nativeWidth: prepared.nativeWidth,
+    nativeHeight: prepared.nativeHeight,
+    w: prepared.w,
+    h: prepared.h,
+    work: prepared.canvas,
+    lum: prepared.lum,
+    exif: prepared.exif.rows,
+    tagCount: prepared.exif.tagCount,
+    gps: prepared.exif.gps,
+    provenance: input.provenance,
+    forensic: input.forensic,
+    chromaSeed: prepared.chromaSeed,
   }
 }
 
@@ -262,7 +196,7 @@ export async function loadSpecimens(): Promise<Specimen[]> {
       })
       if (!res.ok) throw new Error(`Could not load ${plan.slot} (${res.status})`)
       const buffer = await res.arrayBuffer()
-      const bitmap = await decode(new Blob([buffer], { type: 'image/jpeg' }))
+      const prepared = await prepare(buffer, 'image/jpeg')
       const credit = credits.specimens.find((s) => s.slot === plan.slot)
 
       return assemble({
@@ -270,9 +204,7 @@ export async function loadSpecimens(): Promise<Specimen[]> {
         filename: plan.slot,
         label: plan.label,
         role: plan.role,
-        bytes: buffer.byteLength,
-        buffer,
-        bitmap,
+        prepared,
         provenance: {
           title: credit?.source.title ?? plan.slot,
           page: credit?.source.page ?? '',
@@ -301,21 +233,14 @@ export async function specimenFromFile(file: File): Promise<Specimen> {
     file.type ||
     (/\.png$/i.test(file.name) ? 'image/png' : /\.webp$/i.test(file.name) ? 'image/webp' : 'image/jpeg')
 
-  let bitmap: ImageBitmap
-  try {
-    bitmap = await decode(new Blob([buffer], { type }))
-  } catch {
-    throw new Error('Decode failed — this file is not a readable JPEG, PNG or WebP')
-  }
+  const prepared = await prepare(buffer, type)
 
   return assemble({
     id: `upload-${Date.now()}`,
     filename: file.name,
     label: 'UPLOADED',
     role: 'OPERATOR UPLOAD',
-    bytes: buffer.byteLength,
-    buffer,
-    bitmap,
+    prepared,
     provenance: {
       title: file.name,
       page: '',
