@@ -1,0 +1,233 @@
+{
+  "generatedAt": "2026-11-14T20:20:17.019Z",
+  "note": "CC0 photographs from Wikimedia Commons. Files are served locally from /public/specimens; nothing is fetched at runtime.",
+  "minElaRatio": 2,
+  "specimens": [
+    {
+      "slot": "01-camera-exif.jpg",
+      "role": "Privacy X-Ray · genuine camera body, exposure and GPS tags",
+      "source": {
+        "title": "File:Sao Paulo Street at night.jpg",
+        "page": "https://commons.wikimedia.org/wiki/File:Sao_Paulo_Street_at_night.jpg",
+        "license": "cc0",
+        "licenseUrl": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+        "usageTerms": "Creative Commons Zero, Public Domain Dedication",
+        "artist": "Wilfredor",
+        "originalSha1": "af5ff4204f1d54ce146d6be2d35f14ad4216b658"
+      },
+      "original": {
+        "width": 4288,
+        "height": 2848,
+        "bytes": 8299360
+      },
+      "output": {
+        "width": 2200,
+        "height": 1461,
+        "bytes": 746378
+      },
+      "exif": {
+        "make": "NIKON CORPORATION",
+        "model": "NIKON D300",
+        "lens": "18.0-50.0 mm f/2.8",
+        "iso": 160,
+        "fnumber": 6.3,
+        "exposure": 1.6,
+        "focal": 40,
+        "dateTime": "2014-06-14T18:53:40.000Z",
+        "colorSpace": 65535,
+        "software": "Adobe Photoshop Lightroom 5.3 (Windows)",
+        "gps": {
+          "lat": -23.547152,
+          "lon": -46.637638,
+          "alt": 752
+        }
+      },
+      "prep": [
+        "downscaled to long edge 2200 @ q90",
+        "EXIF/IPTC/ICC preserved via sharp withMetadata()"
+      ]
+    },
+    {
+      "slot": "02-color-study.jpg",
+      "role": "Chromatic Harvester · dense, high-chroma night market signage",
+      "source": {
+        "title": "File:Colorful Asian street market (Unsplash).jpg",
+        "page": "https://commons.wikimedia.org/wiki/File:Colorful_Asian_street_market_(Unsplash).jpg",
+        "license": "cc0",
+        "licenseUrl": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+        "usageTerms": "Creative Commons Zero, Public Domain Dedication",
+        "artist": "Steven Wei stevenwei",
+        "originalSha1": "bc2d8466d021168aa8518ae7a409fefb6229161c"
+      },
+      "original": {
+        "width": 5079,
+        "height": 7615,
+        "bytes": 19444846
+      },
+      "output": {
+        "width": 1601,
+        "height": 2400,
+        "bytes": 1294685
+      },
+      "exif": {
+        "make": "SONY",
+        "model": "ILCE-7RM2",
+        "lens": "FE 24-70mm F4 ZA OSS",
+        "iso": 100,
+        "fnumber": 5.6,
+        "exposure": 0.125,
+        "focal": 57,
+        "dateTime": null,
+        "colorSpace": 65535,
+        "software": "Adobe Photoshop Lightroom 6.3 (Macintosh)",
+        "gps": null
+      },
+      "prep": [
+        "downscaled to long edge 2400 @ q90",
+        "EXIF/IPTC/ICC preserved via sharp withMetadata()"
+      ]
+    },
+    {
+      "slot": "03-forensic-edit.jpg",
+      "role": "ELA Forensics · re-saved photograph with a splintered pasted region",
+      "source": {
+        "title": "File:Gray office building facade (Unsplash).jpg",
+        "page": "https://commons.wikimedia.org/wiki/File:Gray_office_building_facade_(Unsplash).jpg",
+        "license": "cc0",
+        "licenseUrl": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+        "usageTerms": "Creative Commons Zero, Public Domain Dedication",
+        "artist": "Echo Grid echogrid",
+        "originalSha1": "d5a97e8019749f4f50c801db4de09c78f5254ce3"
+      },
+      "original": {
+        "width": 3517,
+        "height": 2345,
+        "bytes": 2794797
+      },
+      "output": {
+        "width": 2600,
+        "height": 1734,
+        "bytes": 387994
+      },
+      "exif": {
+        "make": "Canon",
+        "model": "Canon EOS 1200D",
+        "lens": "EF50mm f/1.8 STM",
+        "iso": 100,
+        "fnumber": 10,
+        "exposure": 0.00125,
+        "focal": 50,
+        "dateTime": "2017-03-07T13:50:42.000Z",
+        "colorSpace": 1,
+        "software": "Adobe Photoshop Lightroom 6.5 (Windows)",
+        "gps": null
+      },
+      "prep": [
+        "downscaled to long edge 2600",
+        "base re-saved at q48 (compression history)",
+        "photographic crop 520×187 pasted at 1534,1209 + vector overlay",
+        "cloned masonry block pasted at 1976,767",
+        "whole file re-saved at q88"
+      ],
+      "forensic": {
+        "spliceBox": {
+          "left": 1534,
+          "top": 1209,
+          "width": 520,
+          "height": 187,
+          "varianceSmall": 879.7
+        },
+        "spliceBoxes": [
+          {
+            "left": 1534,
+            "top": 1209,
+            "width": 520,
+            "height": 187,
+            "varianceSmall": 879.7,
+            "label": "PASTED PLATE",
+            "elaRatio": 8.51
+          },
+          {
+            "left": 1976,
+            "top": 767,
+            "width": 442,
+            "height": 274,
+            "varianceSmall": 1233.3,
+            "label": "CLONED MASONRY",
+            "elaRatio": 3.66
+          }
+        ],
+        "ela": {
+          "boxMean": 2.98,
+          "median": 0,
+          "p95": 2,
+          "p99": 3.33,
+          "ratio": 8.51
+        },
+        "elaClone": {
+          "boxMean": 1.28,
+          "median": 0,
+          "p95": 2,
+          "p99": 3.33,
+          "ratio": 3.66
+        },
+        "candidates": [
+          {
+            "baseQuality": 70,
+            "finalQuality": 88,
+            "plateRatio": 4.25,
+            "cloneRatio": 1.84
+          },
+          {
+            "baseQuality": 70,
+            "finalQuality": 80,
+            "plateRatio": 5.81,
+            "cloneRatio": 2.44
+          },
+          {
+            "baseQuality": 70,
+            "finalQuality": 72,
+            "plateRatio": 5.11,
+            "cloneRatio": 2.07
+          },
+          {
+            "baseQuality": 58,
+            "finalQuality": 88,
+            "plateRatio": 8.35,
+            "cloneRatio": 3.6
+          },
+          {
+            "baseQuality": 58,
+            "finalQuality": 80,
+            "plateRatio": 5.62,
+            "cloneRatio": 2.36
+          },
+          {
+            "baseQuality": 58,
+            "finalQuality": 72,
+            "plateRatio": 4.99,
+            "cloneRatio": 1.99
+          },
+          {
+            "baseQuality": 48,
+            "finalQuality": 88,
+            "plateRatio": 8.51,
+            "cloneRatio": 3.66
+          },
+          {
+            "baseQuality": 48,
+            "finalQuality": 80,
+            "plateRatio": 5.63,
+            "cloneRatio": 2.35
+          },
+          {
+            "baseQuality": 48,
+            "finalQuality": 72,
+            "plateRatio": 4.76,
+            "cloneRatio": 1.88
+          }
+        ]
+      }
+    }
+  ]
+}
