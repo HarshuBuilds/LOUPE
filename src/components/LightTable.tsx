@@ -887,7 +887,7 @@ export default function LightTable({
     : []
 
   return (
-    <section className="stage" ref={stageRef} aria-label="Illuminated light table">
+    <section className="stage" ref={stageRef} role="main" aria-label="Illuminated light table">
       {layout ? (
         <div className="plate" style={{ width: layout.width + 30, height: layout.height + 30 }}>
           <div className="ruler ruler--top" aria-hidden="true">

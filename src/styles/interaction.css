@@ -1,3 +1,26 @@
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* The chassis suppresses text selection so a drag never paints a highlight,
+   but metadata is the point of a forensic tool: let it be copied. */
+.pin,
+.sheet,
+.meta-value,
+.slide-name,
+.provenance {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
 /* Keyboard, pointer and motion behaviour. Kept apart from the surface styles in
    studio.css so the accessibility layer can be audited on its own. */
 

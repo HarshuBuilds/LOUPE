@@ -191,6 +191,7 @@ export default function OpticalLens({
       onKeyDown={handleKey}
       tabIndex={0}
       role="group"
+      aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight + - [ ] X"
       aria-label={`${lens.type} lens. Arrow keys move, plus and minus change the aperture, brackets rotate, X closes.`}
     >
       {/* Only the circular glass (and the ring strokes) take pointers, so the

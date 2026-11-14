@@ -121,6 +121,65 @@ function readGps(parsed: Parsed | null): { lat: number; lon: number } | null {
   return typeof lat === 'number' && typeof lon === 'number' ? { lat, lon } : null
 }
 
+const MAX_UPLOAD_PIXELS = 80_000_000
+const MAX_UPLOAD_EDGE = 12_000
+
+/**
+ * Intrinsic size straight from the file header, so an oversized image is
+ * refused before the browser allocates a full-resolution bitmap. Returns null
+ * when the header cannot be read, in which case the decode error path handles it.
+ */
+function readImageSize(buffer: ArrayBuffer): { width: number; height: number } | null {
+  if (buffer.byteLength < 32) return null
+  const view = new DataView(buffer)
+  const bytes = new Uint8Array(buffer)
+
+  if (bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) {
+    return { width: view.getUint32(16), height: view.getUint32(20) }
+  }
+
+  if (bytes[0] === 0xff && bytes[1] === 0xd8) {
+    let offset = 2
+    while (offset + 9 < bytes.length) {
+      if (bytes[offset] !== 0xff) {
+        offset += 1
+        continue
+      }
+      const marker = bytes[offset + 1]
+      if (marker === 0xd8 || marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) {
+        offset += 2
+        continue
+      }
+      const length = view.getUint16(offset + 2)
+      if (length < 2) return null
+      const isFrameHeader =
+        marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc
+      if (isFrameHeader) {
+        return { height: view.getUint16(offset + 5), width: view.getUint16(offset + 7) }
+      }
+      offset += 2 + length
+    }
+    return null
+  }
+
+  const isWebp =
+    bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50 // 'WEBP'
+  if (isWebp) {
+    const chunk = String.fromCharCode(bytes[12], bytes[13], bytes[14], bytes[15])
+    if (chunk === 'VP8X') {
+      return {
+        width: 1 + (bytes[24] | (bytes[25] << 8) | (bytes[26] << 16)),
+        height: 1 + (bytes[27] | (bytes[28] << 8) | (bytes[29] << 16)),
+      }
+    }
+    if (chunk === 'VP8 ') {
+      return { width: view.getUint16(26, true) & 0x3fff, height: view.getUint16(28, true) & 0x3fff }
+    }
+  }
+
+  return null
+}
+
 interface AssembleInput {
   id: string
   filename: string
@@ -134,35 +193,40 @@ interface AssembleInput {
 }
 
 async function assemble(input: AssembleInput): Promise<Specimen> {
-  const { canvas, w, h } = clampToWorking(input.bitmap)
-  // Refuse early if the pixels are not readable, instead of failing mid-eject.
-  if (!assertCanvasReadable(canvas)) throw new Error('CANVAS TAINTED · SPECIMEN REJECTED')
-  const lum = buildLuminance(canvas)
-  const chromaSeed = findChromaSeed(canvas, w, h, Math.round(Math.min(w, h) * 0.15))
-  const parsed = await parseExif(input.buffer.slice(0))
-  const gps = readGps(parsed)
-  const nativeWidth = input.bitmap.width
-  const nativeHeight = input.bitmap.height
-  input.bitmap.close?.()
+  try {
+    const { canvas, w, h } = clampToWorking(input.bitmap)
+    // Refuse early if the pixels are not readable, instead of failing mid-eject.
+    if (!assertCanvasReadable(canvas)) throw new Error('CANVAS TAINTED · SPECIMEN REJECTED')
+    const lum = buildLuminance(canvas)
+    const chromaSeed = findChromaSeed(canvas, w, h, Math.round(Math.min(w, h) * 0.15))
+    const parsed = await parseExif(input.buffer.slice(0))
+    const gps = readGps(parsed)
+    const nativeWidth = input.bitmap.width
+    const nativeHeight = input.bitmap.height
 
-  return {
-    id: input.id,
-    filename: input.filename,
-    label: input.label,
-    role: input.role,
-    bytes: input.bytes,
-    nativeWidth,
-    nativeHeight,
-    w,
-    h,
-    work: canvas,
-    lum,
-    exif: buildExifRows(parsed, gps),
-    tagCount: parsed ? Object.keys(parsed).length : 0,
-    gps,
-    provenance: input.provenance,
-    forensic: input.forensic,
-    chromaSeed,
+    return {
+      id: input.id,
+      filename: input.filename,
+      label: input.label,
+      role: input.role,
+      bytes: input.bytes,
+      nativeWidth,
+      nativeHeight,
+      w,
+      h,
+      work: canvas,
+      lum,
+      exif: buildExifRows(parsed, gps),
+      tagCount: parsed ? Object.keys(parsed).length : 0,
+      gps,
+      provenance: input.provenance,
+      forensic: input.forensic,
+      chromaSeed,
+    }
+  } finally {
+    // The bitmap is only a decode scratch: release it even when the specimen is
+    // rejected, or a large rejected upload pins tens of megabytes.
+    input.bitmap.close?.()
   }
 }
 
@@ -224,9 +288,22 @@ export async function loadSpecimens(): Promise<Specimen[]> {
 
 export async function specimenFromFile(file: File): Promise<Specimen> {
   const buffer = await file.arrayBuffer()
+
+  const size = readImageSize(buffer)
+  if (size && (Math.max(size.width, size.height) > MAX_UPLOAD_EDGE || size.width * size.height > MAX_UPLOAD_PIXELS)) {
+    throw new Error(
+      `IMAGE TOO LARGE · ${size.width}×${size.height} · LIMIT ${MAX_UPLOAD_EDGE} PX / 80 MP`,
+    )
+  }
+
+  // Some operating systems hand over an empty MIME type; fall back to the name.
+  const type =
+    file.type ||
+    (/\.png$/i.test(file.name) ? 'image/png' : /\.webp$/i.test(file.name) ? 'image/webp' : 'image/jpeg')
+
   let bitmap: ImageBitmap
   try {
-    bitmap = await decode(new Blob([buffer], { type: file.type }))
+    bitmap = await decode(new Blob([buffer], { type }))
   } catch {
     throw new Error('Decode failed — this file is not a readable JPEG, PNG or WebP')
   }

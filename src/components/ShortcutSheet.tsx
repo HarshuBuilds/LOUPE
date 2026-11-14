@@ -24,6 +24,7 @@ const ROWS: Array<[string, string]> = [
  * dismisses it, so the sheet never traps a keyboard user.
  */
 export default function ShortcutSheet({ open, onClose }: Props) {
+  const sheetRef = useRef<HTMLDivElement | null>(null)
   const closeRef = useRef<HTMLButtonElement | null>(null)
   const restoreRef = useRef<HTMLElement | null>(null)
 
@@ -31,11 +32,37 @@ export default function ShortcutSheet({ open, onClose }: Props) {
     if (!open) return
     restoreRef.current = document.activeElement as HTMLElement | null
     closeRef.current?.focus()
+
     const onKey = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return
-      event.preventDefault()
-      onClose()
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        onClose()
+        return
+      }
+      if (event.key !== 'Tab') return
+
+      // Keep Tab inside the dialog: without this the page behind stays reachable
+      // and the sheet stops behaving like a modal at all.
+      const sheet = sheetRef.current
+      if (!sheet) return
+      const focusable = Array.from(
+        sheet.querySelectorAll<HTMLElement>(
+          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+        ),
+      ).filter((element) => !element.hasAttribute('disabled'))
+      if (!focusable.length) return
+
+      const first = focusable[0]
+      const last = focusable[focusable.length - 1]
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first.focus()
+      }
     }
+
     window.addEventListener('keydown', onKey)
     return () => {
       window.removeEventListener('keydown', onKey)
@@ -48,6 +75,7 @@ export default function ShortcutSheet({ open, onClose }: Props) {
   return (
     <div className="sheet-backdrop" onClick={onClose}>
       <div
+        ref={sheetRef}
         className="sheet"
         role="dialog"
         aria-modal="true"

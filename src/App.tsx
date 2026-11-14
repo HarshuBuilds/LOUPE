@@ -131,8 +131,10 @@ export default function App() {
         setBundled(list)
         const target = list.find((specimen) => specimen.forensic) ?? list[0]
         if (target) {
-          setActiveId(target.id)
-          setLenses(startingLenses(target))
+          // Never stomp a specimen the operator mounted while the bundled slides
+          // were still decoding.
+          setActiveId((prev) => prev || target.id)
+          setLenses((prev) => (prev.length ? prev : startingLenses(target)))
           setColdOpen(true)
         }
       })
@@ -227,6 +229,9 @@ export default function App() {
       const target = event.target as HTMLElement | null
       if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return
       if (event.metaKey || event.ctrlKey || event.altKey) return
+      // The shortcut sheet owns the keyboard while it is open; A–D must not
+      // rearrange the table behind a modal.
+      if (helpOpen) return
 
       if (event.key === '?' || event.key === 'F1') {
         event.preventDefault()
@@ -245,11 +250,13 @@ export default function App() {
 
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [])
+  }, [helpOpen])
 
   /* -------------------------------------------------------------- uploads --- */
   const handleUpload = async (file: File) => {
-    if (!/^image\/(jpeg|png|webp)$/i.test(file.type)) {
+    const looksReadable =
+      /^image\/(jpeg|png|webp)$/i.test(file.type) || /\.(jpe?g|png|webp)$/i.test(file.name)
+    if (!looksReadable) {
       showNotice('UNSUPPORTED FORMAT · JPEG / PNG / WEBP ONLY')
       sound.click()
       return
@@ -264,6 +271,10 @@ export default function App() {
       const specimen = await specimenFromFile(file)
       setUploads((prev) => [specimen, ...prev].slice(0, 5))
       setActiveId(specimen.id)
+      // An upload starts on a clean table: carrying the previous specimen's
+      // optics over would compose lenses over an unrelated photograph.
+      setLenses(startingLenses(specimen))
+      setColdOpen(false)
       showNotice(`SPECIMEN MOUNTED · ${specimen.filename.toUpperCase()}`)
       sound.shutter()
     } catch (error) {
@@ -285,6 +296,8 @@ export default function App() {
 
   return (
     <div className="studio">
+      <h1 className="sr-only">LOUPE — optical darkroom and image forensics</h1>
+
       <TopTelemetryBar
         specimen={active}
         theme={theme}
@@ -312,6 +325,7 @@ export default function App() {
           // The forensic slide opens composed; every other slide starts as a
           // clean table so the operator mounts the optics they want.
           setLenses(target ? startingLenses(target) : [])
+          setColdOpen(false)
           sound.click()
         }}
         onUpload={(file) => void handleUpload(file)}
@@ -323,7 +337,7 @@ export default function App() {
           specimen={active}
           lenses={lenses}
           theme={theme}
-          coldOpen={coldOpen}
+          coldOpen={coldOpen && Boolean(active.forensic)}
           onLensMove={moveLens}
           onLensParam={patchLens}
           onLensActivate={promoteLens}
@@ -332,7 +346,7 @@ export default function App() {
           onNotice={showNotice}
         />
       ) : (
-        <section className="stage stage--empty">
+        <section className="stage stage--empty" role="main">
           <div className="boot">
             <span className="boot-mark">LOUPE</span>
             <span className="engraved">
