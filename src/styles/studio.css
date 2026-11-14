@@ -864,13 +864,13 @@ html[data-theme='daylight'] .ring-label {
 }
 
 .probe-source {
-  font-size: 6.5px;
+  font-size: 7.5px;
   letter-spacing: 0.14em;
   color: var(--amber);
 }
 
 .probe-line {
-  font-size: 7.5px;
+  font-size: 8px;
   letter-spacing: 0.01em;
   color: rgba(243, 242, 238, 0.9);
   white-space: nowrap;
@@ -1641,6 +1641,49 @@ html[data-theme='daylight'] .dock-hint {
 
   .dock-hint {
     display: none;
+  }
+
+  /* The telemetry strip cannot fit a narrow header: keep the specimen name,
+     drop the rest, and make sure the controls stay on screen. */
+  .topbar {
+    gap: 10px;
+    padding: 0 10px;
+  }
+
+  .brand-sub {
+    display: none;
+  }
+
+  .meta-strip {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  .meta-item:not(:first-child),
+  .meta-sep {
+    display: none;
+  }
+
+  .meta-value {
+    display: block;
+    max-width: 42vw;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .topbar-controls {
+    gap: 6px;
+  }
+
+  .switch-label {
+    display: none;
+  }
+
+  .upload-btn {
+    padding: 0 9px;
+    font-size: 8px;
   }
 }
 

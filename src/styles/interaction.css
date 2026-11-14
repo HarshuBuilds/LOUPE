@@ -1,0 +1,186 @@
+/* Keyboard, pointer and motion behaviour. Kept apart from the surface styles in
+   studio.css so the accessibility layer can be audited on its own. */
+
+:where(button, [tabindex], a, input, [role='button']):focus {
+  outline: none;
+}
+
+:where(button, [tabindex], a, input, [role='button']):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.lens:focus-visible {
+  outline: none;
+}
+
+.lens:focus-visible .ring-casing {
+  stroke: var(--accent);
+}
+
+.lens:focus-visible .lens-ring {
+  filter: drop-shadow(0 0 10px rgba(255, 79, 0, 0.45));
+}
+
+/* ---------------------------------------------------------- help button --- */
+
+.help-btn {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1;
+  color: var(--muted);
+  background: var(--panel-hi);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.help-btn:hover {
+  color: var(--ink);
+  border-color: var(--border-hi);
+}
+
+/* -------------------------------------------------------- shortcut sheet --- */
+
+.sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(8, 9, 11, 0.62);
+}
+
+.sheet {
+  width: min(380px, 100%);
+  max-height: 82vh;
+  overflow: auto;
+  padding: 16px 18px 14px;
+  background: var(--panel);
+  border: 1px solid var(--border-hi);
+  border-radius: 4px;
+  box-shadow: 0 24px 60px var(--shadow);
+}
+
+.sheet-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.sheet-title {
+  margin: 0;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  color: var(--muted);
+}
+
+.sheet-close {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  background: var(--panel-hi);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.sheet-close:hover {
+  border-color: var(--border-hi);
+}
+
+.sheet-list {
+  margin: 0;
+  display: grid;
+  gap: 1px;
+}
+
+.sheet-row {
+  display: grid;
+  grid-template-columns: 104px 1fr;
+  gap: 12px;
+  align-items: baseline;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.sheet-row:last-of-type {
+  border-bottom: none;
+}
+
+.sheet-row dt {
+  margin: 0;
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  color: var(--amber);
+  text-transform: uppercase;
+}
+
+.sheet-row dd {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--ink);
+}
+
+.sheet-note {
+  margin: 12px 0 0;
+  font-size: 7.5px;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+
+/* ------------------------------------------------------------ pointers --- */
+
+@media (pointer: coarse) {
+  .lens-pill {
+    min-height: 30px;
+    padding: 6px 10px;
+  }
+
+  .lens-pill--close {
+    min-width: 30px;
+  }
+
+  .lens-stepper button {
+    width: 22px;
+    height: 22px;
+  }
+
+  .lens-mode-single {
+    padding: 6px 9px;
+  }
+
+  .dock-btn {
+    min-height: 44px;
+  }
+
+  .pin-action,
+  .pin-remove,
+  .zip-btn,
+  .help-btn {
+    min-height: 32px;
+  }
+}
+
+/* -------------------------------------------------------------- motion --- */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}

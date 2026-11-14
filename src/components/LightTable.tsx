@@ -923,6 +923,7 @@ export default function LightTable({
                   onMove={(nx, ny) => onLensMove(lens.id, nx, ny)}
                   onParam={(patch) => onLensParam(lens.id, patch)}
                   onActivate={() => onLensActivate(lens.id)}
+                  onClose={() => onLensClose(lens.id)}
                   index={index}
                 />
               )

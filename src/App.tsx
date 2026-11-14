@@ -4,6 +4,7 @@ import SlideTray from './components/SlideTray'
 import LightTable from './components/LightTable'
 import LensDock from './components/LensDock'
 import Pinboard from './components/Pinboard'
+import ShortcutSheet from './components/ShortcutSheet'
 import { loadSpecimens, specimenFromFile } from './lib/specimens'
 import { exportAllZip } from './lib/cards'
 import { sound } from './lib/soundEngine'
@@ -105,6 +106,7 @@ export default function App() {
   const [scanning, setScanning] = useState(true)
   const [busyUpload, setBusyUpload] = useState(false)
   const [coldOpen, setColdOpen] = useState(false)
+  const [helpOpen, setHelpOpen] = useState(false)
 
   const uploadInputRef = useRef<HTMLInputElement | null>(null)
   const noticeTimer = useRef<number | null>(null)
@@ -219,6 +221,32 @@ export default function App() {
     )
   }
 
+  /* ----------------------------------------------------------- shortcuts --- */
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null
+      if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return
+      if (event.metaKey || event.ctrlKey || event.altKey) return
+
+      if (event.key === '?' || event.key === 'F1') {
+        event.preventDefault()
+        setHelpOpen((prev) => !prev)
+        sound.click()
+        return
+      }
+
+      const mount: Record<string, LensType> = { a: 'ela', b: 'chroma', c: 'dither', d: 'sobel' }
+      const type = mount[event.key.toLowerCase()]
+      if (type) {
+        event.preventDefault()
+        toggleLens(type)
+      }
+    }
+
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
   /* -------------------------------------------------------------- uploads --- */
   const handleUpload = async (file: File) => {
     if (!/^image\/(jpeg|png|webp)$/i.test(file.type)) {
@@ -271,6 +299,7 @@ export default function App() {
           sound.click()
         }}
         onUpload={() => uploadInputRef.current?.click()}
+        onHelp={() => setHelpOpen(true)}
       />
 
       <SlideTray
@@ -340,6 +369,8 @@ export default function App() {
           event.target.value = ''
         }}
       />
+
+      <ShortcutSheet open={helpOpen} onClose={() => setHelpOpen(false)} />
 
       <div className={`notice ${notice ? 'is-visible' : ''}`} role="status" aria-live="polite">
         {notice}

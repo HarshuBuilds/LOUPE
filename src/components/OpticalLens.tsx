@@ -1,5 +1,9 @@
 import { useEffect, useRef } from 'react'
-import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react'
+import type {
+  CSSProperties,
+  KeyboardEvent as ReactKeyboardEvent,
+  PointerEvent as ReactPointerEvent,
+} from 'react'
 import { sound } from '../lib/soundEngine'
 import type { LensState, PaletteColor } from '../lib/types'
 
@@ -26,6 +30,7 @@ interface Props {
   onMove: (nx: number, ny: number) => void
   onParam: (patch: Partial<LensState>) => void
   onActivate: () => void
+  onClose: () => void
   index?: number
 }
 
@@ -53,6 +58,7 @@ export default function OpticalLens({
   onMove,
   onParam,
   onActivate,
+  onClose,
   index = 0,
 }: Props) {
   const rootRef = useRef<HTMLDivElement | null>(null)
@@ -120,6 +126,54 @@ export default function OpticalLens({
     onPointerCancel: endDrag,
   }
 
+  // A lens is one tab stop; arrows nudge it, brackets turn the bezel, and the
+  // same +/- that the gain stepper uses opens and closes the aperture.
+  const handleKey = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (event.metaKey || event.ctrlKey || event.altKey) return
+    const step = event.shiftKey ? 0.04 : 0.01
+
+    switch (event.key) {
+      case 'ArrowLeft':
+        onMove(lens.x - step, lens.y)
+        break
+      case 'ArrowRight':
+        onMove(lens.x + step, lens.y)
+        break
+      case 'ArrowUp':
+        onMove(lens.x, lens.y - step)
+        break
+      case 'ArrowDown':
+        onMove(lens.x, lens.y + step)
+        break
+      case '+':
+      case '=':
+        onParam({ radius: lens.radius + 6 })
+        break
+      case '-':
+      case '_':
+        onParam({ radius: lens.radius - 6 })
+        break
+      case '[':
+        onParam({ rotation: lens.rotation - 15 })
+        break
+      case ']':
+        onParam({ rotation: lens.rotation + 15 })
+        break
+      case 'x':
+      case 'X':
+        onClose()
+        break
+      case 'Enter':
+      case ' ':
+        onActivate()
+        break
+      default:
+        return
+    }
+
+    event.preventDefault()
+  }
+
   return (
     <div
       ref={rootRef}
@@ -133,8 +187,11 @@ export default function OpticalLens({
         animationDelay: `${Math.min(index, 3) * 90}ms`,
       }}
       onPointerDown={onActivate}
+      onFocus={onActivate}
+      onKeyDown={handleKey}
+      tabIndex={0}
       role="group"
-      aria-label={`${lens.type} optical lens`}
+      aria-label={`${lens.type} lens. Arrow keys move, plus and minus change the aperture, brackets rotate, X closes.`}
     >
       {/* Only the circular glass (and the ring strokes) take pointers, so the
           wrapper corners never block another lens. */}
