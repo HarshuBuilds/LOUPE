@@ -29,6 +29,7 @@ export default function LensDock({ active, onToggle }: Props) {
               type="button"
               className={`dock-btn ${isOn ? 'is-on' : ''}`}
               aria-pressed={isOn}
+              aria-keyshortcuts={spec.code}
               onClick={() => onToggle(spec.type)}
             >
               <span className="dock-glyph" aria-hidden="true">

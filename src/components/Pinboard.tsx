@@ -10,7 +10,7 @@ interface Props {
 
 export default function Pinboard({ pins, onRemove, onExportAll, onCopy }: Props) {
   return (
-    <aside className="pinboard">
+    <aside className="pinboard" aria-label="Pinboard outputs">
       <header className="pinboard-head">
         <span className="engraved">PINBOARD OUTPUTS</span>
         <span className="mono pinboard-count">{String(pins.length).padStart(2, '0')}</span>

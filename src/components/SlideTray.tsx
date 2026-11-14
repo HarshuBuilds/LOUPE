@@ -36,10 +36,10 @@ export default function SlideTray({ specimens, activeId, onSelect, onUpload, bus
   const inputRef = useRef<HTMLInputElement | null>(null)
 
   return (
-    <aside className="tray">
+    <aside className="tray" aria-label="Specimen tray">
       <header className="tray-head">
         <span className="engraved">35MM SLIDE TRAY</span>
-        <span className="tray-count mono">{specimens.length} / 3</span>
+        <span className="tray-count mono">{String(specimens.length).padStart(2, '0')}</span>
       </header>
 
       <div className="tray-list">

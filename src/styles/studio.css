@@ -2,6 +2,7 @@
 
 .studio {
   position: relative;
+  height: 100vh;
   height: 100dvh;
   width: 100vw;
   /* A darkroom is an instrument, not a document: never let a drag paint a text
@@ -1613,6 +1614,7 @@ html[data-theme='daylight'] .dock-hint {
       'tray'
       'pins';
     height: auto;
+    min-height: 100vh;
     min-height: 100dvh;
     overflow-y: auto;
   }
