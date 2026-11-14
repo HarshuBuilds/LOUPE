@@ -1,8 +1,15 @@
 import type { DitherMode, DitherOptions, Layout, LensState, PaletteColor, Specimen } from './types'
+import { elaInWorker, opticsWorkerSupported } from './opticsWorker'
+import {
+  MAX_WORKING_EDGE,
+  chromaSeedFromPixels,
+  elaFromPixels,
+  luminanceFromPixels,
+} from './opticsCore'
 
 export type { DitherOptions }
 
-export const MAX_WORKING_EDGE = 1400
+export { MAX_WORKING_EDGE }
 /**
  * The ELA layer is normalised per image so that this gain renders it at
  * reference brightness. Gain above/below becomes a cheap canvas brightness
@@ -39,8 +46,10 @@ export function loadImage(src: string, crossOrigin: string | null = 'anonymous')
 /** Prove the canvas is readable before any lens depends on it. */
 export function assertCanvasReadable(canvas: HTMLCanvasElement): boolean {
   try {
+    // A single pixel read is enough: a tainted canvas throws here exactly as it
+    // would on export, and skipping the full-canvas toDataURL saves the main
+    // thread ~40 ms on every 1400 px specimen.
     ctx2d(canvas).getImageData(0, 0, 1, 1)
-    canvas.toDataURL('image/jpeg', 0.5)
     return true
   } catch {
     return false
@@ -66,12 +75,18 @@ export function clampToWorking(bitmap: ImageBitmap): {
 
 export function buildLuminance(canvas: HTMLCanvasElement): Uint8Array {
   const { width: w, height: h } = canvas
-  const data = ctx2d(canvas).getImageData(0, 0, w, h).data
-  const lum = new Uint8Array(w * h)
-  for (let i = 0, p = 0; i < data.length; i += 4, p++) {
-    lum[p] = (0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]) | 0
-  }
-  return lum
+  return luminanceFromPixels(ctx2d(canvas).getImageData(0, 0, w, h).data, w, h)
+}
+
+/** Put a prepared pixel buffer on a fresh canvas (worker results arrive this way). */
+export function canvasFromPixels(
+  pixels: Uint8ClampedArray<ArrayBuffer>,
+  w: number,
+  h: number,
+): HTMLCanvasElement {
+  const canvas = makeCanvas(w, h)
+  ctx2d(canvas).putImageData(new ImageData(pixels, w, h), 0, 0)
+  return canvas
 }
 
 /* --------------------------------------------------------------- ELA --- */
@@ -100,6 +115,33 @@ export interface ElaLayer {
 export async function buildElaLayer(source: HTMLCanvasElement): Promise<ElaLayer> {
   const w = source.width
   const h = source.height
+
+  if (opticsWorkerSupported()) {
+    try {
+      const pixels = ctx2d(source).getImageData(0, 0, w, h).data
+      const result = await elaInWorker(pixels, w, h, 0.75)
+      return {
+        canvas: canvasFromPixels(result.pixels, w, h),
+        raw: result.raw,
+        w,
+        h,
+        normalization: result.normalization,
+        p995: result.p995,
+      }
+    } catch {
+      // The worker is a performance path, not a requirement: fall through.
+    }
+  }
+
+  return buildElaLayerLocal(source, w, h)
+}
+
+/** Main-thread fallback for engines without a usable worker. */
+async function buildElaLayerLocal(
+  source: HTMLCanvasElement,
+  w: number,
+  h: number,
+): Promise<ElaLayer> {
   const original = ctx2d(source).getImageData(0, 0, w, h).data
   const url = source.toDataURL('image/jpeg', 0.75)
   const img = await loadImage(url)
@@ -109,40 +151,10 @@ export async function buildElaLayer(source: HTMLCanvasElement): Promise<ElaLayer
   sctx.drawImage(img, 0, 0, w, h)
   const compressed = sctx.getImageData(0, 0, w, h).data
 
-  const pixels = w * h
-  const diff = new Uint8Array(pixels * 3)
-  for (let i = 0, j = 0; i < original.length; i += 4, j += 3) {
-    diff[j] = Math.abs(original[i] - compressed[i])
-    diff[j + 1] = Math.abs(original[i + 1] - compressed[i + 1])
-    diff[j + 2] = Math.abs(original[i + 2] - compressed[i + 2])
-  }
-
-  // Anchor on the 99.5th percentile, sampled coarsely so this stays cheap.
-  const samples: number[] = []
-  const stride = Math.max(1, Math.floor(pixels / 16000))
-  for (let p = 0; p < pixels; p += stride) {
-    const i = p * 3
-    samples.push((diff[i] + diff[i + 1] + diff[i + 2]) / 3)
-  }
-  samples.sort((a, b) => a - b)
-  const p995 = samples[Math.min(samples.length - 1, Math.floor(samples.length * 0.995))] ?? 1
-  const normalization = Math.min(80, Math.max(3, 235 / Math.max(2, p995)))
-
-  const raw = new Uint8Array(pixels * 3)
-  for (let i = 0; i < diff.length; i++) {
-    raw[i] = Math.min(255, diff[i] * normalization)
-  }
-
-  // Display gamma only: seams and splice edges pop while the compression noise
-  // floor recedes. `raw` stays linear so elaStats and the splice ratio keep
-  // their documented meaning.
-  const display = new Uint8Array(raw.length)
-  for (let i = 0; i < raw.length; i++) {
-    display[i] = Math.round(255 * Math.pow(raw[i] / 255, 1.55))
-  }
-
-  const canvas = paintEla(display, w, h)
-  return { canvas, raw, w, h, normalization, p995 }
+  // Shared with the worker: identical maths on both paths, so a fallback build
+  // is pixel-identical to a worker build.
+  const { display, raw, normalization, p995 } = elaFromPixels(original, compressed, w, h)
+  return { canvas: paintEla(display, w, h), raw, w, h, normalization, p995 }
 }
 
 export function paintEla(raw: Uint8Array, w: number, h: number): HTMLCanvasElement {
@@ -561,49 +573,5 @@ export function findChromaSeed(
   h: number,
   radius: number,
 ): { x: number; y: number } {
-  const data = ctx2d(canvas).getImageData(0, 0, w, h).data
-  const r = Math.max(20, Math.min(radius, Math.floor(Math.min(w, h) / 2)))
-  const step = Math.max(2, Math.round(r / 9))
-  const hop = Math.max(10, Math.round(r / 2))
-  const r2 = r * r
-  let best = { score: -1, x: 0.5, y: 0.5 }
-
-  for (let cy = r; cy <= h - r; cy += hop) {
-    for (let cx = r; cx <= w - r; cx += hop) {
-      let sum = 0
-      let valueSum = 0
-      let n = 0
-      const sats: number[] = []
-      for (let y = cy - r; y < cy + r; y += step) {
-        const dy = y - cy
-        for (let x = cx - r; x < cx + r; x += step) {
-          const dx = x - cx
-          if (dx * dx + dy * dy > r2) continue
-          const o = (y * w + x) * 4
-          const rr = data[o]
-          const gg = data[o + 1]
-          const bb = data[o + 2]
-          const mx = Math.max(rr, gg, bb)
-          const mn = Math.min(rr, gg, bb)
-          const sat = mx === 0 ? 0 : (mx - mn) / mx
-          sum += sat
-          valueSum += mx / 255
-          sats.push(sat)
-          n++
-        }
-      }
-      if (!n) continue
-      // Peak saturation matters more than the average: a small vivid market
-      // stall inside a grey facade should still win the seed search.
-      sats.sort((a, b) => a - b)
-      const p90 = sats[Math.floor(sats.length * 0.9)] ?? 0
-      const mean = sum / n
-      // Bright vivid content beats dark tinted glass: a neon sign outranks a
-      // teal-tinted window even when both are saturated.
-      const score = mean * 0.3 + p90 * 0.5 + (valueSum / n) * 0.2
-      if (score > best.score) best = { score, x: cx / w, y: cy / h }
-    }
-  }
-
-  return { x: Math.min(0.86, Math.max(0.14, best.x)), y: Math.min(0.86, Math.max(0.14, best.y)) }
+  return chromaSeedFromPixels(ctx2d(canvas).getImageData(0, 0, w, h).data, w, h, radius)
 }
