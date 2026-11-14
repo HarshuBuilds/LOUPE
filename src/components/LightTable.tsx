@@ -132,6 +132,8 @@ export default function LightTable({
   const [palettes, setPalettes] = useState<Record<string, PaletteColor[]>>({})
   const [readouts, setReadouts] = useState<Record<string, number>>({})
   const [probes, setProbes] = useState<Record<string, LensProbe>>({})
+  const [probeAnnouncement, setProbeAnnouncement] = useState('')
+  const announceRef = useRef<{ timer: number | null; pending: string }>({ timer: null, pending: '' })
 
   const needsEla = lenses.some((lens) => lens.type === 'ela')
   const needsSobel = lenses.some((lens) => lens.type === 'sobel')
@@ -528,6 +530,36 @@ export default function LightTable({
     return () => cancelAnimationFrame(frame)
   }, [render])
 
+  /**
+   * The probe numerals live inside a lens bezel, which a screen reader cannot
+   * follow. Mirror the newest sample into a polite live region, throttled: a
+   * drag samples every frame and a 60 Hz announcement is worse than none.
+   */
+  useEffect(() => {
+    const entries = Object.values(probes)
+    if (!entries.length) {
+      setProbeAnnouncement('')
+      return
+    }
+    const latest = entries[entries.length - 1]
+    const next = `${latest.source} at 2.5× · RGB ${latest.r} ${latest.g} ${latest.b} · ${latest.hex}`
+    const slot = announceRef.current
+    if (next === slot.pending) return
+    slot.pending = next
+    if (slot.timer !== null) return
+    slot.timer = window.setTimeout(() => {
+      slot.timer = null
+      setProbeAnnouncement(slot.pending)
+    }, 700)
+  }, [probes])
+
+  useEffect(
+    () => () => {
+      if (announceRef.current.timer !== null) window.clearTimeout(announceRef.current.timer)
+    },
+    [],
+  )
+
   /* ---------------------------------------------------------- sampling --- */
   const underFor = useCallback(
     (lens: LensState): LensState | null => {
@@ -888,6 +920,10 @@ export default function LightTable({
 
   return (
     <section className="stage" ref={stageRef} role="main" aria-label="Illuminated light table">
+      <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+        {probeAnnouncement}
+      </div>
+
       {layout ? (
         <div className="plate" style={{ width: layout.width + 30, height: layout.height + 30 }}>
           <div className="ruler ruler--top" aria-hidden="true">

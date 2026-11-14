@@ -108,6 +108,7 @@ export default function App() {
   const [coldOpen, setColdOpen] = useState(false)
   const [helpOpen, setHelpOpen] = useState(false)
 
+  const studioRef = useRef<HTMLDivElement | null>(null)
   const uploadInputRef = useRef<HTMLInputElement | null>(null)
   const noticeTimer = useRef<number | null>(null)
   const zCounter = useRef(2)
@@ -295,7 +296,14 @@ export default function App() {
   }
 
   return (
-    <div className="studio">
+    <div
+      className="studio"
+      ref={studioRef}
+      // The sheet is portalled outside this subtree, so hiding the table here
+      // takes it out of the accessibility tree and the tab order in one move.
+      inert={helpOpen}
+      aria-hidden={helpOpen || undefined}
+    >
       <h1 className="sr-only">LOUPE — optical darkroom and image forensics</h1>
 
       <TopTelemetryBar
