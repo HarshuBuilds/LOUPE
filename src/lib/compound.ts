@@ -110,84 +110,231 @@ const STACKED_DEPTH = 0.62
 export function compoundChips(
   pairs: Array<{ key: string; ids: [string, string]; a: Circle; b: Circle }>,
 ): CompoundChip[] {
-  const loose: CompoundChip[] = []
-  const stacked: CompoundChip[] = []
-  const clustered = new Set<string>()
+  const entries = pairs
+    .map((entry) => ({ ...entry, pair: circlePair(entry.a, entry.b) }))
+    .filter((entry) => entry.pair.hit)
 
-  for (const { key, ids, a, b } of pairs) {
-    const pair = circlePair(a, b)
-    if (!pair.hit) continue
-    if (pair.depth <= STACKED_DEPTH) {
-      loose.push({ key, x: pair.mid.x, y: pair.mid.y, label: compoundLabel(2) })
-      continue
-    }
-    ids.forEach((id) => clustered.add(id))
-    stacked.push({
-      key,
-      x: (a.cx + b.cx) / 2,
-      y: Math.min(a.cy - a.r, b.cy - b.r) - 18,
-      label: compoundLabel(2),
-    })
+  // Pairs sharing a lens belong to one stack and share one marker.
+  const parent = new Map<string, string>()
+  const find = (id: string): string => {
+    const root = parent.get(id) ?? id
+    if (root === id) return id
+    const lifted = find(root)
+    parent.set(id, lifted)
+    return lifted
+  }
+  for (const { ids } of entries) {
+    const [a, b] = ids.map(find)
+    if (a !== b) parent.set(a, b)
   }
 
-  if (stacked.length < 2) return [...loose, ...stacked]
+  const groups = new Map<string, typeof entries>()
+  for (const entry of entries) {
+    const root = find(entry.ids[0])
+    groups.set(root, [...(groups.get(root) ?? []), entry])
+  }
 
-  const x = stacked.reduce((sum, chip) => sum + chip.x, 0) / stacked.length
-  const y = Math.min(...stacked.map((chip) => chip.y))
-  return [...loose, { key: 'cluster', x, y, label: compoundLabel(clustered.size) }]
+  const chips: CompoundChip[] = []
+  for (const group of groups.values()) {
+    const circles = group.flatMap((entry) => [entry.a, entry.b])
+    const top = Math.min(...circles.map((circle) => circle.cy - circle.r)) - 18
+
+    if (group.length === 1) {
+      const [{ key, pair }] = group
+      const tight = pair.depth > STACKED_DEPTH
+      chips.push({
+        key,
+        x: tight ? (group[0].a.cx + group[0].b.cx) / 2 : pair.mid.x,
+        y: tight ? top : pair.mid.y,
+        label: compoundLabel(2),
+      })
+      continue
+    }
+
+    const ids = new Set(group.flatMap((entry) => entry.ids))
+    const left = Math.min(...circles.map((circle) => circle.cx))
+    const right = Math.max(...circles.map((circle) => circle.cx))
+    chips.push({ key: `cluster-${[...ids].join('-')}`, x: (left + right) / 2, y: top, label: compoundLabel(ids.size) })
+  }
+
+  return chips
+}
+
+export type ChromeItem = 'readout' | 'action' | 'close' | 'stepper' | 'mode'
+
+export interface ChromeAnchor {
+  item: ChromeItem
+  angle: number
+  radius: number
+}
+
+/** The familiar resting layout, kept whenever a lens overlaps nothing. */
+const PREFERRED_ANGLE: Record<ChromeItem, number> = {
+  readout: 315,
+  action: 45,
+  close: 180,
+  stepper: 0,
+  mode: 90,
+}
+
+/** Orbit radii beyond the rim, tried in order. */
+const CHROME_TIERS = [26, 54]
+/** Half a pill, so a slot can clear a neighbouring rim instead of grazing it. */
+const PILL_HALF = 34
+const MIN_GAP = 74
+const CHIP_GAP = 52
+
+function candidateAngles(preferred: number): number[] {
+  return Array.from({ length: 8 }, (_, index) => (preferred + index * 45) % 360)
 }
 
 /**
- * Orbit angles that clear every lens's own chrome and the `N× STACK` chip:
- * 0°/45°/180° belong to the gain stepper, the action and close, 270° to the
- * chip, and 90° to the dither mode button.
+ * Chrome slot for every pill of every lens. A lens that touches nothing keeps
+ * the familiar layout; inside a stack the slots are solved greedily from the
+ * front glass back, so no readout, action or close button lands on another
+ * lens's pill, on a neighbouring rim, or on the `N× STACK` chip.
  */
-const READOUT_ANGLES = [315, 225, 135]
-const READOUT_GAP = 26
-/** Half a readout pill, so a candidate clears a neighbouring rim rather than grazing it. */
-const PILL_HALF = 34
+type Fitting = { id: string; circle: Circle; items: ChromeItem[] }
 
-/**
- * Readout angle per lens. Each candidate is scored by how far it sits from the
- * other lens rims and from readouts already placed, so overlapping lenses keep
- * their pills apart and out from under the front glass.
- */
-export function placeReadouts(lenses: Array<{ id: string; circle: Circle }>): Record<string, number> {
-  const placed: Array<{ x: number; y: number }> = []
-  const angles: Record<string, number> = {}
+/** Groups of lenses whose circles touch, transitively. */
+function clustersOf(lenses: Fitting[]): number[][] {
+  const parent = lenses.map((_, index) => index)
+  const find = (index: number): number =>
+    parent[index] === index ? index : (parent[index] = find(parent[index]))
 
-  // Topmost lens first so the front glass keeps the default upper-right slot.
-  for (const { id, circle } of [...lenses].reverse()) {
-    const others = lenses.filter((lens) => lens.id !== id).map((lens) => lens.circle)
-    let best = READOUT_ANGLES[0]
-    let bestScore = -Infinity
-
-    for (const angle of READOUT_ANGLES) {
-      const rad = (angle * Math.PI) / 180
-      const point = {
-        x: circle.cx + Math.cos(rad) * (circle.r + READOUT_GAP),
-        y: circle.cy + Math.sin(rad) * (circle.r + READOUT_GAP),
-      }
-      const clearance = others.length
-        ? Math.min(...others.map((other) => Math.hypot(point.x - other.cx, point.y - other.cy) - other.r - PILL_HALF))
-        : Infinity
-      // Separation decides; sitting under another lens is a hard demotion.
-      const separation = placed.length
-        ? Math.min(...placed.map((other) => Math.hypot(point.x - other.x, point.y - other.y)))
-        : 10_000
-      const score = separation + (clearance < 0 ? -100_000 : 0)
-      if (score > bestScore) {
-        bestScore = score
-        best = angle
-      }
+  for (let i = 0; i < lenses.length; i++) {
+    for (let j = i + 1; j < lenses.length; j++) {
+      if (circlePair(lenses[i].circle, lenses[j].circle).hit) parent[find(i)] = find(j)
     }
-
-    const rad = (best * Math.PI) / 180
-    placed.push({ x: circle.cx + Math.cos(rad) * (circle.r + READOUT_GAP), y: circle.cy + Math.sin(rad) * (circle.r + READOUT_GAP) })
-    angles[id] = best
   }
 
-  return angles
+  const groups = new Map<number, number[]>()
+  lenses.forEach((_, index) => {
+    const root = find(index)
+    groups.set(root, [...(groups.get(root) ?? []), index])
+  })
+  return [...groups.values()]
+}
+
+/**
+ * Three or more lenses leave no room for per-lens orbits, so the whole cluster
+ * shares one ring: every pill of every lens gets its own slice, evenly spaced.
+ * The ring grows until the widest pill fits between neighbours.
+ */
+/** Degrees left free at the top of the ring so the `N× STACK` chip stays clear. */
+const CHIP_GAP_DEGREES = 60
+/** Width the ring has to fit between neighbouring pills. */
+const RING_PITCH = 68
+
+function ringAnchors(members: Fitting[]): Record<string, ChromeAnchor[]> {
+  const items = [...members].reverse().flatMap((member) => member.items.map((item) => ({ id: member.id, item })))
+  const maxRadius = Math.max(...members.map((member) => member.circle.r))
+  const span = 360 - CHIP_GAP_DEGREES
+  const step = span / Math.max(1, items.length - 1)
+  const radius = Math.max(
+    maxRadius + CHROME_TIERS[0],
+    RING_PITCH / 2 / Math.sin((Math.min(step, 90) * Math.PI) / 360),
+  )
+
+  const layout: Record<string, ChromeAnchor[]> = {}
+  items.forEach((entry, index) => {
+    const angle = (270 + CHIP_GAP_DEGREES / 2 + index * step) % 360
+    layout[entry.id] = [...(layout[entry.id] ?? []), { item: entry.item, angle, radius }]
+  })
+  return layout
+}
+
+function solvePair(
+  lenses: Fitting[],
+  avoid: Array<{ x: number; y: number }>,
+): Record<string, ChromeAnchor[]> {
+  const placed: Array<{ x: number; y: number }> = []
+  const layout: Record<string, ChromeAnchor[]> = {}
+
+  for (const { id, circle, items } of [...lenses].reverse()) {
+    const others = lenses.filter((lens) => lens.id !== id).map((lens) => lens.circle)
+    const crowded = others.some(
+      (other) => Math.hypot(other.cx - circle.cx, other.cy - circle.cy) < other.r + circle.r,
+    )
+    const anchors: ChromeAnchor[] = []
+
+    for (const item of items) {
+      if (!crowded) {
+        anchors.push({ item, angle: PREFERRED_ANGLE[item], radius: circle.r + CHROME_TIERS[0] })
+        continue
+      }
+
+      let best: ChromeAnchor = { item, angle: PREFERRED_ANGLE[item], radius: circle.r + CHROME_TIERS[0] }
+      let bestScore = -Infinity
+
+      for (const tier of CHROME_TIERS) {
+        for (const angle of candidateAngles(PREFERRED_ANGLE[item])) {
+          const radius = circle.r + tier
+          const rad = (angle * Math.PI) / 180
+          const point = { x: circle.cx + Math.cos(rad) * radius, y: circle.cy + Math.sin(rad) * radius }
+          const gap = placed.length
+            ? Math.min(...placed.map((other) => Math.hypot(point.x - other.x, point.y - other.y)))
+            : 10_000
+          const chipGap = avoid.length
+            ? Math.min(...avoid.map((other) => Math.hypot(point.x - other.x, point.y - other.y)))
+            : 10_000
+          const covered = others.some(
+            (other) => Math.hypot(point.x - other.cx, point.y - other.cy) < other.r + PILL_HALF,
+          )
+
+          let score = Math.min(gap, chipGap)
+          if (gap < MIN_GAP) score -= 500
+          if (chipGap < CHIP_GAP) score -= 500
+          if (covered) score -= 1000
+
+          if (score > bestScore) {
+            bestScore = score
+            best = { item, angle, radius }
+          }
+        }
+      }
+
+      anchors.push(best)
+      const rad = (best.angle * Math.PI) / 180
+      placed.push({ x: circle.cx + Math.cos(rad) * best.radius, y: circle.cy + Math.sin(rad) * best.radius })
+    }
+
+    layout[id] = anchors
+  }
+
+  return layout
+}
+
+/**
+ * Chrome slot for every pill of every lens. A lone lens keeps the familiar
+ * layout, a pair is solved slot by slot, and a stack of three or more shares an
+ * evenly divided ring, so no readout, action or close button ever lands on
+ * another lens's pill or on the `N× STACK` chip.
+ */
+export function placeChrome(
+  lenses: Fitting[],
+  avoid: Array<{ x: number; y: number }> = [],
+): Record<string, ChromeAnchor[]> {
+  const layout: Record<string, ChromeAnchor[]> = {}
+
+  for (const group of clustersOf(lenses)) {
+    const members = group.map((index) => lenses[index])
+    const anchors =
+      members.length === 1
+        ? {
+            [members[0].id]: members[0].items.map((item) => ({
+              item,
+              angle: PREFERRED_ANGLE[item],
+              radius: members[0].circle.r + CHROME_TIERS[0],
+            })),
+          }
+        : members.length === 2
+          ? solvePair(members, avoid)
+          : ringAnchors(members)
+    Object.assign(layout, anchors)
+  }
+
+  return layout
 }
 
 /** Dashed International-Orange arcs along the boundary each lens keeps inside the other. */

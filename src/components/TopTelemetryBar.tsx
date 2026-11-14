@@ -8,6 +8,7 @@ interface Props {
   onTheme: () => void
   onAudio: () => void
   onUpload: () => void
+  onHelp: () => void
   scanning: boolean
 }
 
@@ -18,6 +19,7 @@ export default function TopTelemetryBar({
   onTheme,
   onAudio,
   onUpload,
+  onHelp,
   scanning,
 }: Props) {
   const exposure = specimen
@@ -109,6 +111,17 @@ export default function TopTelemetryBar({
             <span className="switch-knob" />
           </span>
           <span className="switch-label engraved">AUDIO FX</span>
+        </button>
+
+        <button
+          type="button"
+          className="help-btn mono"
+          onClick={onHelp}
+          aria-label="Keyboard shortcuts"
+          aria-haspopup="dialog"
+          title="Keyboard shortcuts (?)"
+        >
+          ?
         </button>
 
         <button type="button" className="upload-btn" onClick={onUpload}>

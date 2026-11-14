@@ -44,7 +44,7 @@ export default function LensDock({ active, onToggle }: Props) {
         })}
       </div>
       <div className="dock-hint mono">
-        WHEEL = APERTURE · SHIFT = PARAMETER · ALT = DOT SCALE · DRAG RING TO MOVE
+        DRAG RING · WHEEL APERTURE · SHIFT PARAM · ALT DOTS · ? KEYS
       </div>
     </div>
   )
