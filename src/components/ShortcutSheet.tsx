@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { createPortal } from 'react-dom'
 
 interface Props {
   open: boolean
@@ -20,8 +21,8 @@ const ROWS: Array<[string, string]> = [
 
 /**
  * Shortcut reference, opened with `?` or the header button. Focus moves to the
- * close control and returns to whatever was focused before, and Escape always
- * dismisses it, so the sheet never traps a keyboard user.
+ * close control, Tab cycles inside the dialog, and Escape always dismisses it
+ * and hands focus back to whatever had it before.
  */
 export default function ShortcutSheet({ open, onClose }: Props) {
   const sheetRef = useRef<HTMLDivElement | null>(null)
@@ -72,7 +73,9 @@ export default function ShortcutSheet({ open, onClose }: Props) {
 
   if (!open) return null
 
-  return (
+  // Portalled to <body> so the chassis behind it can be made inert without
+  // taking the dialog with it.
+  return createPortal(
     <div className="sheet-backdrop" onClick={onClose}>
       <div
         ref={sheetRef}
@@ -110,6 +113,7 @@ export default function ShortcutSheet({ open, onClose }: Props) {
           Specimens are read on this device only. Nothing is uploaded.
         </p>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
