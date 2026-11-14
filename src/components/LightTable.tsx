@@ -4,6 +4,7 @@ import {
   ELA_REFERENCE_GAIN,
   buildElaLayer,
   buildSobelLayer,
+  contrastRatio,
   ctx2d,
   ditherRegion,
   elaStats,
@@ -20,10 +21,10 @@ import {
   clipVesica,
   compoundChips,
   isMagnifier,
-  placeReadouts,
+  placeChrome,
   strokeCompoundArcs,
 } from '../lib/compound'
-import type { Circle } from '../lib/compound'
+import type { ChromeItem, Circle } from '../lib/compound'
 import { buildReportCard, buildSwatchCard, exportDither, exportScrubbed } from '../lib/cards'
 import { sound } from '../lib/soundEngine'
 import type {
@@ -38,6 +39,14 @@ import type {
 } from '../lib/types'
 import OpticalLens, { TAU } from './OpticalLens'
 import type { LensProbe } from './OpticalLens'
+import LensControls from './LensControls'
+
+const ACTION_LABEL: Record<LensState['type'], string> = {
+  ela: 'REPORT',
+  chroma: 'SWATCH',
+  dither: 'STAMP',
+  sobel: 'SCRUB',
+}
 
 interface Props {
   specimen: Specimen
@@ -836,10 +845,38 @@ export default function LightTable({
     return compoundChips(pairs)
   }, [ordered, layout, circleOf])
 
-  const readoutAngles = useMemo(
-    () => placeReadouts(ordered.map((lens) => ({ id: lens.id, circle: circleOf(lens) }))),
-    [ordered, circleOf],
+  const chromeLayout = useMemo(
+    () =>
+      placeChrome(
+        ordered.map((lens) => ({
+          id: lens.id,
+          circle: circleOf(lens),
+          items: [
+            'readout',
+            'action',
+            'close',
+            ...(lens.type === 'ela' ? ['stepper' as const] : []),
+            ...(lens.type === 'dither' ? ['mode' as const] : []),
+          ] as ChromeItem[],
+        })),
+        compoundBadges.map((badge) => ({ x: badge.x, y: badge.y })),
+      ),
+    [ordered, circleOf, compoundBadges],
   )
+
+  const readoutFor = (lens: LensState): string => {
+    if (lens.type === 'ela') {
+      const delta = readouts[lens.id]
+      return delta === undefined ? 'Δ —' : `Δ ${delta.toFixed(1)}%`
+    }
+    if (lens.type === 'chroma') {
+      const palette = palettes[lens.id] ?? []
+      const ratio = palette.length > 1 ? contrastRatio(palette[0], palette[1]) : 0
+      return ratio ? `${ratio.toFixed(2)}:1` : '—'
+    }
+    if (lens.type === 'dither') return `THR ${lens.threshold}`
+    return specimen.gps ? 'GPS EXPOSED' : 'GPS CLEAR'
+  }
 
   /* -------------------------------------------------------------- view --- */
   const topLabels = layout
@@ -882,20 +919,46 @@ export default function LightTable({
                   r={frame.r}
                   viewport={{ width: layout.width, height: layout.height }}
                   palette={palettes[lens.id] ?? []}
-                  deltaPct={readouts[lens.id]}
-                  tagCount={specimen.tagCount}
-                  hasGps={Boolean(specimen.gps)}
                   probe={probes[lens.id]}
                   onMove={(nx, ny) => onLensMove(lens.id, nx, ny)}
                   onParam={(patch) => onLensParam(lens.id, patch)}
-                  onAction={(action) => handleAction(lens, action)}
                   onActivate={() => onLensActivate(lens.id)}
-                  onClose={() => onLensClose(lens.id)}
-                  readoutAngle={readoutAngles[lens.id] ?? 315}
                   index={index}
                 />
               )
             })}
+
+            <div className="lens-controls-layer">
+              {ordered.map((lens) => {
+                const frame = frameOf(lens)
+                return (
+                  <LensControls
+                    key={lens.id}
+                    lensId={lens.id}
+                    cx={frame.cx}
+                    cy={frame.cy}
+                    anchors={chromeLayout[lens.id] ?? []}
+                    readout={readoutFor(lens)}
+                    action={ACTION_LABEL[lens.type]}
+                    risk={lens.type === 'sobel' && Boolean(specimen.gps)}
+                    gain={lens.type === 'ela' ? lens.gain : undefined}
+                    mode={lens.type === 'dither' ? (lens.mode === 'bayer' ? 'BAYER' : 'ATKINSON') : undefined}
+                    onAction={() => handleAction(lens, 'primary')}
+                    onClose={() => onLensClose(lens.id)}
+                    onGain={
+                      lens.type === 'ela'
+                        ? (delta) => onLensParam(lens.id, { gain: Math.min(40, Math.max(10, lens.gain + delta)) })
+                        : undefined
+                    }
+                    onMode={
+                      lens.type === 'dither'
+                        ? () => onLensParam(lens.id, { mode: lens.mode === 'bayer' ? 'atkinson' : 'bayer' })
+                        : undefined
+                    }
+                  />
+                )
+              })}
+            </div>
 
             {compoundBadges.map((badge) => (
               <div

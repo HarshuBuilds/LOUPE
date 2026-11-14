@@ -1049,6 +1049,25 @@ html[data-theme='daylight'] .compound-badge {
   color: var(--muted);
 }
 
+/* Chrome sits above every lens, so a pill belonging to a lens buried in a
+   stack is never cut by the front lens's bezel or glass. */
+.lens-controls-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 150;
+  pointer-events: none;
+}
+
+.lens-controls-layer .lens-pill,
+.lens-controls-layer .lens-stepper,
+.lens-controls-layer .lens-mode-single {
+  pointer-events: auto;
+}
+
+.lens-controls-layer .lens-pill--readout {
+  pointer-events: none;
+}
+
 .lens-pill--action {
   cursor: pointer;
   color: var(--ink);

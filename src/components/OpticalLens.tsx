@@ -1,6 +1,5 @@
 import { useEffect, useRef } from 'react'
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react'
-import { contrastRatio } from '../lib/layers'
 import { sound } from '../lib/soundEngine'
 import type { LensState, PaletteColor } from '../lib/types'
 
@@ -23,17 +22,10 @@ interface Props {
   r: number
   viewport: { width: number; height: number }
   palette: PaletteColor[]
-  deltaPct: number | undefined
-  tagCount: number
-  hasGps: boolean
   probe?: LensProbe
   onMove: (nx: number, ny: number) => void
   onParam: (patch: Partial<LensState>) => void
-  onAction: (action: 'primary' | 'secondary') => void
   onActivate: () => void
-  onClose: () => void
-  /** Orbit angle for the readout pill; chosen so overlapping lenses don't collide. */
-  readoutAngle?: number
   index?: number
 }
 
@@ -50,13 +42,6 @@ function orbitStyle(angleDeg: number, radius: number): CSSProperties {
 /** 72 graduations at 5°; only the cardinals carry a number. */
 const TICKS = Array.from({ length: 72 }, (_, i) => i * 5)
 
-const ACTION_LABEL: Record<LensState['type'], string> = {
-  ela: 'REPORT',
-  chroma: 'SWATCH',
-  dither: 'STAMP',
-  sobel: 'SCRUB',
-}
-
 export default function OpticalLens({
   lens,
   cx,
@@ -64,16 +49,10 @@ export default function OpticalLens({
   r,
   viewport,
   palette,
-  deltaPct,
-  tagCount,
-  hasGps,
   probe,
   onMove,
   onParam,
-  onAction,
   onActivate,
-  onClose,
-  readoutAngle = 315,
   index = 0,
 }: Props) {
   const rootRef = useRef<HTMLDivElement | null>(null)
@@ -140,24 +119,6 @@ export default function OpticalLens({
     onPointerUp: endDrag,
     onPointerCancel: endDrag,
   }
-
-  const ratio = palette.length > 1 ? contrastRatio(palette[0], palette[1]) : 0
-  const chromeRadius = r + 26
-
-  const readout =
-    lens.type === 'ela'
-      ? deltaPct !== undefined
-        ? `Δ ${deltaPct.toFixed(1)}%`
-        : 'Δ —'
-      : lens.type === 'chroma'
-        ? ratio
-          ? `${ratio.toFixed(2)}:1`
-          : '—'
-        : lens.type === 'dither'
-          ? `THR ${lens.threshold}`
-          : hasGps
-            ? 'GPS EXPOSED'
-            : 'GPS CLEAR'
 
   return (
     <div
@@ -257,85 +218,6 @@ export default function OpticalLens({
         </div>
       ) : null}
 
-      <div
-        className={`lens-pill lens-pill--readout ${lens.type === 'sobel' && hasGps ? 'lens-pill--risk' : ''}`}
-        style={orbitStyle(readoutAngle, chromeRadius)}
-      >
-        {readout}
-      </div>
-
-      <button
-        type="button"
-        className="lens-pill lens-pill--action"
-        style={orbitStyle(45, chromeRadius)}
-        data-nodrag
-        aria-label={`${ACTION_LABEL[lens.type]} — eject this lens output`}
-        onClick={(event) => {
-          event.stopPropagation()
-          onAction('primary')
-        }}
-      >
-        {ACTION_LABEL[lens.type]}
-      </button>
-
-      {lens.type === 'ela' ? (
-        <div className="lens-stepper" style={orbitStyle(0, chromeRadius)} data-nodrag>
-          <button
-            type="button"
-            aria-label="Decrease gain"
-            onClick={(event) => {
-              event.stopPropagation()
-              onParam({ gain: clamp(lens.gain - 2, 10, 40) })
-              sound.detent()
-            }}
-          >
-            −
-          </button>
-          <span className="stepper-val mono">{lens.gain}×</span>
-          <button
-            type="button"
-            aria-label="Increase gain"
-            onClick={(event) => {
-              event.stopPropagation()
-              onParam({ gain: clamp(lens.gain + 2, 10, 40) })
-              sound.detent()
-            }}
-          >
-            +
-          </button>
-        </div>
-      ) : null}
-
-      <button
-        type="button"
-        className="lens-pill lens-pill--close"
-        style={orbitStyle(180, chromeRadius)}
-        data-nodrag
-        aria-label="Close lens"
-        title="Close lens"
-        onClick={(event) => {
-          event.stopPropagation()
-          onClose()
-        }}
-      >
-        ×
-      </button>
-
-      {lens.type === 'dither' ? (
-        <button
-          type="button"
-          className="lens-mode-single mono"
-          data-nodrag
-          aria-label="Toggle dither mode"
-          onClick={(event) => {
-            event.stopPropagation()
-            onParam({ mode: lens.mode === 'bayer' ? 'atkinson' : 'bayer' })
-            sound.click()
-          }}
-        >
-          {lens.mode === 'bayer' ? 'BAYER' : 'ATKINSON'}
-        </button>
-      ) : null}
     </div>
   )
 }
